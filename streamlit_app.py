@@ -686,12 +686,114 @@ elif page == "📊 Advanced Analysis":
     
     st.markdown("---")
     
-    # Real CTR distribution from sample predictions
+    # Real CTR distribution from sample predictions - ENHANCED
     st.markdown("### 📈 CTR Distribution Analysis")
     
-    col1, col2 = st.columns(2)
+    # Cached function to generate CTR distribution with detailed stats
+    @st.cache_data(ttl=600, show_spinner=False)
+    def generate_ctr_distribution_detailed():
+        """Generate comprehensive CTR distribution - cached for 10 minutes"""
+        sample_ctrs = []
+        sample_values = ['1000', 'efba', '05db', 'fb9c', '25c8']
+        
+        for _ in range(100):
+            features = {}
+            for i in range(1, 14):
+                features[f'I{i}'] = int(np.random.randint(0, 100))
+            for i in range(1, 27):
+                features[f'C{i}'] = np.random.choice(sample_values)
+            
+            result = ranking_system.predict_single_ad(features)
+            sample_ctrs.append(result['predicted_ctr'])
+        
+        sample_ctrs_np = np.array(sample_ctrs)
+        
+        # Calculate statistics
+        stats = {
+            'min': np.min(sample_ctrs_np) * 100,
+            'max': np.max(sample_ctrs_np) * 100,
+            'mean': np.mean(sample_ctrs_np) * 100,
+            'median': np.median(sample_ctrs_np) * 100,
+            'std': np.std(sample_ctrs_np) * 100,
+            'p5': np.percentile(sample_ctrs_np, 95) * 100,
+            'p10': np.percentile(sample_ctrs_np, 90) * 100,
+            'p25': np.percentile(sample_ctrs_np, 75) * 100,
+            'p50': np.percentile(sample_ctrs_np, 50) * 100,
+        }
+        
+        # Create deciles
+        sample_ctrs_sorted = sorted(sample_ctrs, reverse=True)
+        decile_size = len(sample_ctrs_sorted) // 10
+        decile_ctrs = [np.mean(sample_ctrs_sorted[i*decile_size:(i+1)*decile_size]) * 100 
+                      for i in range(10)]
+        
+        decile_df = pd.DataFrame({
+            'Decile': [f'D{i}' for i in range(1, 11)],
+            'CTR': decile_ctrs
+        })
+        
+        return decile_df, stats, sample_ctrs_np * 100
     
-    with col1:
+    # Generate with spinner only on first load
+    try:
+        with st.spinner("Generating CTR distribution..."):
+            ctr_data, stats, all_ctrs = generate_ctr_distribution_detailed()
+        
+        # Layout: Stats | Visualization
+        col1, col2 = st.columns([1, 2])
+        
+        with col1:
+            st.markdown("#### 📊 Distribution Statistics")
+            st.metric("Mean CTR", f"{stats['mean']:.2f}%", 
+                     delta=f"{stats['mean'] - 25.62:.2f}% vs training")
+            st.metric("Median CTR", f"{stats['median']:.2f}%")
+            
+            st.markdown("**Range:**")
+            st.write(f"• Min: {stats['min']:.2f}%")
+            st.write(f"• Max: {stats['max']:.2f}%")
+            st.write(f"• Std Dev: {stats['std']:.2f}%")
+            
+            st.markdown("---")
+            st.caption("📈 Based on 100 predictions (cached)")
+        
+        with col2:
+            # Decile bar chart
+            st.markdown("#### Decile Performance")
+            st.bar_chart(ctr_data.set_index('Decile')['CTR'])
+            
+            # Histogram
+            st.markdown("#### Distribution Shape")
+            hist_data = pd.DataFrame({'CTR %': all_ctrs})
+            st.bar_chart(hist_data['CTR %'].value_counts(bins=15).sort_index())
+        
+        # Performance Tiers
+        st.markdown("#### 🏆 Performance Tiers")
+        tier_cols = st.columns(4)
+        
+        with tier_cols[0]:
+            st.markdown(f"""
+            **🏆 Elite (Top 5%)**  
+            {stats['p5']:.1f}%+ CTR
+            """)
+        with tier_cols[1]:
+            st.markdown(f"""
+            **⭐ Excellent (Top 10%)**  
+            {stats['p10']:.1f}%+ CTR
+            """)
+        with tier_cols[2]:
+            st.markdown(f"""
+            **✅ Good (Top 25%)**  
+            {stats['p25']:.1f}%+ CTR
+            """)
+        with tier_cols[3]:
+            st.markdown(f"""
+            **📊 Average (50%)**  
+            {stats['p50']:.1f}%+ CTR
+            """)
+        
+    except Exception as e:
+        st.warning(f"Could not generate distribution: {e}")
+        # Fallback to training stats
         st.info("""
         **Training Data Statistics:**
         - Overall CTR: 25.62%
@@ -700,38 +802,6 @@ elif page == "📊 Advanced Analysis":
         - Test Samples: 2M
         - Total Features: 150
         """)
-    
-    with col2:
-        # Generate real CTR predictions on sample data
-        with st.spinner("Generating CTR distribution..."):
-            try:
-                sample_ctrs = []
-                sample_values = ['1000', 'efba', '05db', 'fb9c', '25c8']
-                
-                for _ in range(100):
-                    features = {}
-                    for i in range(1, 14):
-                        features[f'I{i}'] = int(np.random.randint(0, 100))
-                    for i in range(1, 27):
-                        features[f'C{i}'] = np.random.choice(sample_values)
-                    
-                    result = ranking_system.predict_single_ad(features)
-                    sample_ctrs.append(result['predicted_ctr'])
-                
-                # Create deciles
-                sample_ctrs.sort(reverse=True)
-                decile_size = len(sample_ctrs) // 10
-                decile_ctrs = [np.mean(sample_ctrs[i*decile_size:(i+1)*decile_size]) * 100 
-                              for i in range(10)]
-                
-                ctr_data = pd.DataFrame({
-                    'Decile': [f'D{i}' for i in range(1, 11)],
-                    'CTR': decile_ctrs
-                })
-                st.bar_chart(ctr_data.set_index('Decile'))
-                st.caption(f"Based on 100 sample predictions")
-            except Exception as e:
-                st.warning(f"Could not generate distribution: {e}")
     
     st.markdown("---")
     
