@@ -755,11 +755,11 @@ elif page == "📊 Advanced Analysis":
     
     st.markdown("---")
     
-    # What-if analysis
+    # What-if analysis - Enhanced with more scenarios and visualizations
     st.markdown("### 🔮 What-If Analysis")
-    st.info("Analyze how changing features affects CTR prediction")
+    st.info("Analyze how changing features affects CTR prediction - Test multiple scenarios")
     
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     
     with col1:
         base_i1 = st.slider("I1 (Click count)", 0, 100, 50)
@@ -767,34 +767,80 @@ elif page == "📊 Advanced Analysis":
         base_i2 = st.slider("I2 (Impressions)", 0, 100, 50)
     with col3:
         base_i10 = st.slider("I10 (Position)", 0, 100, 25)
+    with col4:
+        num_scenarios = st.selectbox("Scenarios to test", [5, 10, 20, 50], index=1)
     
     if st.button("🔮 Run What-If Analysis", type="primary", use_container_width=True):
-        with st.spinner("Analyzing..."):
-            # Simulate 3 scenarios
-            sample_values = ['1000', 'efba', '05db']
-            scenarios = []
-            
-            for multiplier in [0.5, 1.0, 1.5]:
-                features = {}
-                features['I1'] = int(base_i1 * multiplier)
-                features['I2'] = int(base_i2 * multiplier)
-                features['I10'] = int(base_i10 * multiplier)
+        with st.spinner(f"Running {num_scenarios} scenarios..."):
+            try:
+                sample_values = ['1000', 'efba', '05db', 'fb9c', '25c8', '7e6e']
+                scenarios = []
                 
-                for i in range(4, 14):
-                    features[f'I{i}'] = int(np.random.randint(0, 50))
-                for i in range(1, 27):
-                    features[f'C{i}'] = np.random.choice(sample_values)
+                # Test across a range of multipliers
+                multipliers = np.linspace(0.25, 2.0, num_scenarios)
                 
-                result = ranking_system.predict_single_ad(features)
-                scenarios.append({
-                    'Scenario': f"{int(multiplier*100)}% of Base",
-                    'CTR': f"{result['predicted_ctr']:.2%}",
-                    'Quality': f"{result['quality_score']:.3f}",
-                    'Final Score': f"{result['final_score']:.3f}"
-                })
-            
-            scenario_df = pd.DataFrame(scenarios)
-            st.dataframe(scenario_df, hide_index=True, use_container_width=True)
+                for idx, multiplier in enumerate(multipliers):
+                    features = {}
+                    features['I1'] = int(base_i1 * multiplier)
+                    features['I2'] = int(base_i2 * multiplier)
+                    features['I10'] = int(base_i10 * multiplier)
+                    
+                    # Fill other features with slight variations
+                    for i in range(4, 14):
+                        features[f'I{i}'] = int(np.random.randint(0, 50))
+                    for i in range(1, 27):
+                        features[f'C{i}'] = np.random.choice(sample_values)
+                    
+                    result = ranking_system.predict_single_ad(features)
+                    scenarios.append({
+                        'Scenario': f"#{idx+1}",
+                        'Multiplier': f"{multiplier:.2f}x",
+                        'I1': features['I1'],
+                        'I2': features['I2'],
+                        'I10': features['I10'],
+                        'CTR': result['predicted_ctr'],
+                        'Quality Score': result['quality_score'],
+                        'Final Score': result['final_score']
+                    })
+                
+                scenario_df = pd.DataFrame(scenarios)
+                
+                # Show summary statistics
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Avg CTR", f"{scenario_df['CTR'].mean():.2%}", 
+                             f"Range: {scenario_df['CTR'].min():.2%} - {scenario_df['CTR'].max():.2%}")
+                with col2:
+                    st.metric("Avg Quality", f"{scenario_df['Quality Score'].mean():.3f}",
+                             f"Std: {scenario_df['Quality Score'].std():.3f}")
+                with col3:
+                    st.metric("Best Scenario", f"#{scenario_df['Final Score'].idxmax() + 1}",
+                             f"Score: {scenario_df['Final Score'].max():.3f}")
+                
+                # Visualizations
+                st.markdown("#### 📊 CTR vs Multiplier")
+                chart_data = scenario_df[['Multiplier', 'CTR']].copy()
+                chart_data['CTR %'] = chart_data['CTR'] * 100
+                st.line_chart(chart_data.set_index('Multiplier')['CTR %'])
+                
+                st.markdown("#### 📈 Quality Score vs Final Score")
+                scatter_data = scenario_df[['Quality Score', 'Final Score', 'CTR']].copy()
+                st.scatter_chart(scatter_data, x='Quality Score', y='Final Score', size='CTR')
+                
+                # Detailed table
+                st.markdown("#### 📋 Detailed Results")
+                display_df = scenario_df.copy()
+                display_df['CTR'] = display_df['CTR'].apply(lambda x: f"{x:.2%}")
+                display_df['Quality Score'] = display_df['Quality Score'].apply(lambda x: f"{x:.3f}")
+                display_df['Final Score'] = display_df['Final Score'].apply(lambda x: f"{x:.3f}")
+                st.dataframe(display_df, hide_index=True, use_container_width=True, height=400)
+                
+                # Download option
+                csv = scenario_df.to_csv(index=False)
+                st.download_button("📥 Download Results", csv, "whatif_analysis.csv", "text/csv")
+                
+            except Exception as e:
+                st.error(f"Error running analysis: {e}")
 
 # Page 3: Batch Processing
 elif page == "📦 Batch Processing":
