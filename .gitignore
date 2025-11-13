@@ -1,0 +1,69 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+*.parquet
+data/
+
+# Large model files (download separately or use Git LFS)
+app/models/*.pkl
+app/models/*.txt
+app/models/*.json
+app/models/*.h5
+app/models/*.bin
+
+# Keep requirements and runtime
+!requirements.txt
+!runtime.txt
+!app/models/README.md
+
+# Logs
+*.log
+logs/
+*.log.*
