@@ -14,6 +14,13 @@ from datetime import datetime
 # Add parent directory to path to import app modules
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
+# Download models on first run (for Streamlit Cloud deployment)
+try:
+    from download_models import download_models
+    download_models()
+except Exception as e:
+    st.warning(f"Could not download models: {e}")
+
 from app.ctr_model import CTRPredictor
 from app.ad_scorer import AdScorer
 from app.ad_ranking_system import AdRankingSystem
