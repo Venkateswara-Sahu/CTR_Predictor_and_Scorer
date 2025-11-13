@@ -645,10 +645,23 @@ elif page == "📊 Advanced Analysis":
                 feature_importance[name] = feature_importance.get(name, 0) + importance * 0.6  # LGB weight
         
         if ranking_system.ctr_predictor.xgb_model:
-            xgb_importance = ranking_system.ctr_predictor.xgb_model.get_score(importance_type='gain')
-            
-            for name, importance in xgb_importance.items():
-                feature_importance[name] = feature_importance.get(name, 0) + importance * 0.4  # XGB weight
+            # XGBoost uses get_score() method (not get_score)
+            try:
+                # Try as Booster (JSON loaded model)
+                xgb_importance = ranking_system.ctr_predictor.xgb_model.get_score(importance_type='gain')
+                for name, importance in xgb_importance.items():
+                    feature_importance[name] = feature_importance.get(name, 0) + importance * 0.4
+            except AttributeError:
+                # Try as XGBClassifier (sklearn API)
+                if hasattr(ranking_system.ctr_predictor.xgb_model, 'feature_importances_'):
+                    xgb_importance = ranking_system.ctr_predictor.xgb_model.feature_importances_
+                    if hasattr(ranking_system.ctr_predictor.xgb_model, 'feature_names_in_'):
+                        feature_names = ranking_system.ctr_predictor.xgb_model.feature_names_in_
+                    else:
+                        feature_names = [f"f{i}" for i in range(len(xgb_importance))]
+                    
+                    for name, importance in zip(feature_names, xgb_importance):
+                        feature_importance[name] = feature_importance.get(name, 0) + importance * 0.4
         
         # Sort and get top 15
         sorted_features = sorted(feature_importance.items(), key=lambda x: x[1], reverse=True)[:15]
