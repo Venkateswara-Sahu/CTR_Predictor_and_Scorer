@@ -983,15 +983,19 @@ elif page == "📦 Batch Processing":
                 csv = results.to_csv(index=False)
                 st.download_button("📥 Download All Results", csv, "sample_predictions.csv", "text/csv")
 
-# Page 4: Compare & Rank
+# Page 4: Compare & Rank - ENHANCED
 elif page == "🏆 Compare & Rank":
     st.header("🏆 Compare & Rank Ads")
-    st.markdown("Auto-generate ads and see rankings instantly")
+    st.markdown("Generate multiple ads and see which performs best!")
     
-    num_ads = st.slider("Number of ads to compare", 3, 10, 5)
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        num_ads = st.slider("Number of ads to compare", 3, 20, 5)
+    with col2:
+        sort_by = st.selectbox("Sort by", ["Final Score", "CTR", "Quality Score"])
     
     if st.button("🎲 Generate & Rank Ads", type="primary", use_container_width=True):
-        with st.spinner("Generating and ranking ads..."):
+        with st.spinner("🔮 Generating and ranking ads..."):
             sample_values = ['1000', 'efba', '05db', 'fb9c', '25c8', '7e6e', '0b15', '21dd']
             
             ads = []
@@ -1005,32 +1009,121 @@ elif page == "🏆 Compare & Rank":
             
             results = ranking_system.rank_ads(ads, return_details=True)
             
+            # Sort based on user selection
+            sort_col = {'Final Score': 'final_score', 'CTR': 'predicted_ctr', 'Quality Score': 'quality_score'}[sort_by]
+            results = results.sort_values(sort_col, ascending=False).reset_index(drop=True)
+            
             st.success("✅ Ranking Complete!")
             
-            # Top 3 medals
-            st.markdown("### 🏆 Top 3 Ads")
+            # Summary metrics
+            metric_cols = st.columns(4)
+            with metric_cols[0]:
+                st.metric("🏆 Winner CTR", f"{results.iloc[0]['predicted_ctr']:.1%}", 
+                         delta=f"+{(results.iloc[0]['predicted_ctr'] - results['predicted_ctr'].mean())*100:.1f}% vs avg")
+            with metric_cols[1]:
+                st.metric("📊 Avg CTR", f"{results['predicted_ctr'].mean():.1%}")
+            with metric_cols[2]:
+                st.metric("📈 CTR Range", f"{results['predicted_ctr'].min():.1%} - {results['predicted_ctr'].max():.1%}")
+            with metric_cols[3]:
+                st.metric("⭐ Avg Quality", f"{results['quality_score'].mean():.3f}")
+            
+            st.markdown("---")
+            
+            # Top 3 Podium with enhanced styling
+            st.markdown("### 🎖️ Top 3 Performers")
             medals = ["🥇", "🥈", "🥉"]
+            tier_names = ["CHAMPION", "RUNNER-UP", "BRONZE"]
+            colors = ["#FFD700", "#C0C0C0", "#CD7F32"]
+            
             cols = st.columns(3)
             
             for idx, (_, row) in enumerate(results.head(3).iterrows()):
                 with cols[idx]:
-                    st.markdown(f"### {medals[idx]} Rank {idx+1}")
-                    st.metric("CTR", f"{row['predicted_ctr']:.1%}")
-                    st.metric("Quality", f"{row['quality_score']:.3f}")
-                    st.metric("Score", f"{row['final_score']:.3f}")
+                    st.markdown(f"""
+                    <div style='text-align: center; padding: 20px; background: linear-gradient(135deg, {colors[idx]}22, {colors[idx]}11); border-radius: 10px; border: 2px solid {colors[idx]}'>
+                        <h1>{medals[idx]}</h1>
+                        <h3>Ad #{idx+1}</h3>
+                        <p style='color: {colors[idx]}; font-weight: bold; font-size: 14px;'>{tier_names[idx]}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    st.metric("CTR Prediction", f"{row['predicted_ctr']:.2%}")
+                    st.metric("Quality Score", f"{row['quality_score']:.3f}")
+                    st.metric("Final Score", f"{row['final_score']:.3f}")
+                    
+                    # Show key features
+                    with st.expander("🔍 View Key Features"):
+                        st.write(f"**I1 (Click count):** {int(row.get('I1', 0))}")
+                        st.write(f"**I2 (Impressions):** {int(row.get('I2', 0))}")
+                        st.write(f"**I10 (Position):** {int(row.get('I10', 0))}")
             
-            # Full table
-            st.markdown("### 📊 All Rankings")
-            display_df = results[['predicted_ctr', 'quality_score', 'final_score']].copy()
-            display_df['predicted_ctr'] = display_df['predicted_ctr'].apply(lambda x: f"{x:.1%}")
-            display_df.index = [f"Ad {i+1}" for i in range(len(display_df))]
-            st.dataframe(display_df, use_container_width=True)
+            st.markdown("---")
             
-            # Chart
-            st.markdown("### 📈 Visual Comparison")
-            chart_data = results[['predicted_ctr', 'quality_score']].copy()
-            chart_data.index = [f"Ad {i+1}" for i in range(len(chart_data))]
-            st.bar_chart(chart_data)
+            # Full rankings table with better formatting
+            st.markdown("### 📊 Complete Rankings")
+            
+            # Create enhanced display dataframe
+            display_df = pd.DataFrame({
+                'Rank': [f"#{i+1}" for i in range(len(results))],
+                'Ad Name': [f"Ad-{i+1:03d}" for i in range(len(results))],
+                'CTR': results['predicted_ctr'].apply(lambda x: f"{x:.2%}"),
+                'Quality': results['quality_score'].apply(lambda x: f"{x:.3f}"),
+                'Final Score': results['final_score'].apply(lambda x: f"{x:.4f}"),
+                'Tier': results['final_score'].apply(lambda x: 
+                    "🏆 Elite" if x >= results['final_score'].quantile(0.8) else
+                    "⭐ Great" if x >= results['final_score'].quantile(0.6) else
+                    "✅ Good" if x >= results['final_score'].quantile(0.4) else
+                    "📊 Average")
+            })
+            
+            st.dataframe(display_df, hide_index=True, use_container_width=True, height=400)
+            
+            # Visualizations
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("#### 📈 CTR Distribution")
+                ctr_chart = pd.DataFrame({
+                    'Ad': [f"Ad {i+1}" for i in range(len(results))],
+                    'CTR %': results['predicted_ctr'] * 100
+                })
+                st.bar_chart(ctr_chart.set_index('Ad'))
+            
+            with col2:
+                st.markdown("#### ⚖️ CTR vs Quality")
+                scatter_data = pd.DataFrame({
+                    'Quality Score': results['quality_score'],
+                    'CTR %': results['predicted_ctr'] * 100,
+                    'Final Score': results['final_score']
+                })
+                st.scatter_chart(scatter_data, x='Quality Score', y='CTR %', size='Final Score')
+            
+            # Download options
+            st.markdown("---")
+            col1, col2 = st.columns(2)
+            with col1:
+                csv = results.to_csv(index=False)
+                st.download_button("📥 Download Full Results (CSV)", csv, "ad_rankings.csv", "text/csv", use_container_width=True)
+            with col2:
+                # Create summary report
+                summary = f"""
+AD RANKING REPORT
+==================
+Generated: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}
+Total Ads: {len(results)}
+Sort By: {sort_by}
+
+TOP 3 PERFORMERS:
+1. Ad #1: CTR {results.iloc[0]['predicted_ctr']:.2%}, Quality {results.iloc[0]['quality_score']:.3f}
+2. Ad #2: CTR {results.iloc[1]['predicted_ctr']:.2%}, Quality {results.iloc[1]['quality_score']:.3f}
+3. Ad #3: CTR {results.iloc[2]['predicted_ctr']:.2%}, Quality {results.iloc[2]['quality_score']:.3f}
+
+STATISTICS:
+Average CTR: {results['predicted_ctr'].mean():.2%}
+Max CTR: {results['predicted_ctr'].max():.2%}
+Min CTR: {results['predicted_ctr'].min():.2%}
+Avg Quality: {results['quality_score'].mean():.3f}
+"""
+                st.download_button("📄 Download Summary Report", summary, "ranking_summary.txt", "text/plain", use_container_width=True)
 
 # Page 5: System Info
 elif page == "⚙️ System Info":
