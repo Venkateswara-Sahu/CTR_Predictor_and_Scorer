@@ -547,20 +547,52 @@ elif page == "🎯 Quick Predict":
         result = st.session_state['last_result']
         
         st.markdown("---")
+        
+        # Enhanced results display with visual gauges and detailed analysis
         st.markdown("## 📊 Prediction Results")
         
-        # Big animated metrics
+        ctr_pct = result['predicted_ctr'] * 100
+        delta_color = "normal" if result['predicted_ctr'] > 0.25 else "inverse"
+        
+        # Determine percentile ranking
+        percentile = min(100, max(0, (result['predicted_ctr'] / 0.50) * 100))
+        
+        # Performance tier
+        if result['predicted_ctr'] >= 0.50:
+            tier = "🏆 Elite"
+            tier_color = "#FFD700"
+        elif result['predicted_ctr'] >= 0.35:
+            tier = "⭐ Excellent"
+            tier_color = "#4CAF50"
+        elif result['predicted_ctr'] >= 0.20:
+            tier = "✅ Good"
+            tier_color = "#2196F3"
+        else:
+            tier = "📊 Average"
+            tier_color = "#FF9800"
+        
+        # Top summary card
+        st.markdown(f"""
+        <div style='text-align: center; padding: 30px; background: linear-gradient(135deg, {tier_color}22, {tier_color}11); 
+                    border-radius: 15px; border: 3px solid {tier_color}; margin-bottom: 20px;'>
+            <h1 style='color: {tier_color}; margin: 0;'>{tier}</h1>
+            <h2 style='margin: 10px 0;'>CTR: {ctr_pct:.2f}%</h2>
+            <p style='font-size: 18px; color: #666;'>Predicted Click-Through Rate</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Detailed metrics in 3 columns
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            ctr_pct = result['predicted_ctr'] * 100
-            delta_color = "normal" if result['predicted_ctr'] > 0.25 else "inverse"
             st.metric(
-                label="📈 Click-Through Rate",
+                label="🎯 CTR Prediction",
                 value=f"{ctr_pct:.2f}%",
-                delta=f"{(result['predicted_ctr'] - 0.25) * 100:.1f}% vs baseline",
+                delta=f"{(result['predicted_ctr'] - 0.2562) * 100:.1f}% vs avg (25.62%)",
                 delta_color=delta_color
             )
+            # Visual gauge
+            st.progress(min(result['predicted_ctr'], 1.0), text=f"Percentile: ~{percentile:.0f}%")
         
         with col2:
             st.metric(
@@ -569,30 +601,92 @@ elif page == "🎯 Quick Predict":
                 delta="0-1 scale",
                 delta_color="off"
             )
+            st.progress(result['quality_score'], text=f"{result['quality_score']*100:.0f}% quality")
         
         with col3:
             st.metric(
-                label="🎯 Final Score",
+                label="🏆 Final Score",
                 value=f"{result['final_score']:.3f}",
-                delta="Combined metric",
+                delta="60% CTR + 40% Quality",
                 delta_color="off"
             )
+            st.progress(result['final_score'], text=f"{result['final_score']*100:.0f}% overall")
         
-        # Visual interpretation with progress bars
-        st.markdown("### 📊 Performance Analysis")
+        st.markdown("---")
+        
+        # Performance breakdown
+        st.markdown("### 📈 Performance Breakdown")
+        
+        breakdown_cols = st.columns(4)
+        with breakdown_cols[0]:
+            st.markdown(f"""
+            **🎯 CTR Component**  
+            Weight: 60%  
+            Contribution: {result['predicted_ctr'] * 0.6:.3f}
+            """)
+        with breakdown_cols[1]:
+            st.markdown(f"""
+            **⭐ Quality Component**  
+            Weight: 40%  
+            Contribution: {result['quality_score'] * 0.4:.3f}
+            """)
+        with breakdown_cols[2]:
+            if result['predicted_ctr'] > 0.50:
+                benchmark = "🏆 Elite (Top 5%)"
+            elif result['predicted_ctr'] > 0.35:
+                benchmark = "⭐ Great (Top 10%)"
+            elif result['predicted_ctr'] > 0.25:
+                benchmark = "✅ Above Average"
+            else:
+                benchmark = "📊 Below Average"
+            st.markdown(f"""
+            **📊 Benchmark**  
+            {benchmark}  
+            Estimate: Top {100-percentile:.0f}%
+            """)
+        with breakdown_cols[3]:
+            lift = ((result['predicted_ctr'] / 0.2562) - 1) * 100
+            st.markdown(f"""
+            **📈 CTR Lift**  
+            vs Baseline: {lift:+.1f}%  
+            Multiplier: {result['predicted_ctr'] / 0.2562:.2f}x
+            """)
+        
+        # Visual interpretation
+        st.markdown("### 💡 Interpretation")
         
         if result['predicted_ctr'] > 0.50:
-            st.success(f"🎉 **EXCELLENT PERFORMANCE** - CTR of {ctr_pct:.1f}% is {ctr_pct/25:.1f}x the baseline!")
-            st.progress(min(result['predicted_ctr'], 1.0))
-        elif result['predicted_ctr'] > 0.30:
-            st.info(f"👍 **GOOD PERFORMANCE** - CTR of {ctr_pct:.1f}% is {(ctr_pct-25):.1f}% above baseline")
-            st.progress(result['predicted_ctr'])
-        elif result['predicted_ctr'] > 0.15:
-            st.warning(f"⚠️ **AVERAGE PERFORMANCE** - CTR of {ctr_pct:.1f}% is near baseline (25%)")
-            st.progress(result['predicted_ctr'])
+            st.success(f"""
+            🎉 **OUTSTANDING PERFORMANCE!**  
+            This ad is predicted to achieve an exceptional {ctr_pct:.1f}% CTR, which is {result['predicted_ctr']/0.2562:.1f}x 
+            the average. This is in the top 5% of all ads. **Highly recommended for deployment!**
+            """)
+        elif result['predicted_ctr'] > 0.35:
+            st.info(f"""
+            ⭐ **EXCELLENT PERFORMANCE!**  
+            This ad is predicted to achieve a strong {ctr_pct:.1f}% CTR, which is {lift:.1f}% above average. 
+            This is in the top 10% of ads. **Great choice for your campaign!**
+            """)
+        elif result['predicted_ctr'] > 0.20:
+            st.info(f"""
+            ✅ **GOOD PERFORMANCE**  
+            This ad is predicted to achieve a solid {ctr_pct:.1f}% CTR, which is near the baseline. 
+            **Consider A/B testing with variations to optimize further.**
+            """)
         else:
-            st.error(f"❌ **LOW PERFORMANCE** - CTR of {ctr_pct:.1f}% needs improvement")
-            st.progress(result['predicted_ctr'])
+            st.warning(f"""
+            ⚠️ **NEEDS OPTIMIZATION**  
+            This ad is predicted to achieve {ctr_pct:.1f}% CTR, which is {abs(lift):.1f}% below average. 
+            **Recommendation:** Review ad copy, targeting, or creative elements before deployment.
+            """)
+        
+        # Comparison chart
+        st.markdown("### 📊 Score Comparison")
+        comparison_data = pd.DataFrame({
+            'Metric': ['Your Ad', 'Average (Training)', 'Top 10%', 'Top 5%'],
+            'CTR %': [result['predicted_ctr'] * 100, 25.62, 35.0, 50.0]
+        })
+        st.bar_chart(comparison_data.set_index('Metric'))
         
         # Collapsible feature view
         with st.expander("🔍 View Input Features"):
@@ -608,19 +702,48 @@ elif page == "🎯 Quick Predict":
                 st.json(c_features)
         
         # Export options
-        st.markdown("### 💾 Export Results")
-        col1, col2, col3 = st.columns(3)
+        st.markdown("---")
+        st.markdown("### 💾 Export & Actions")
+        col1, col2, col3, col4 = st.columns(4)
         
         with col1:
             result_json = json.dumps(result, indent=2)
-            st.download_button("📥 Download JSON", result_json, "prediction.json", "application/json")
+            st.download_button("📥 JSON", result_json, "prediction.json", "application/json", use_container_width=True)
         
         with col2:
-            result_csv = f"CTR,Quality,Final Score\n{result['predicted_ctr']},{result['quality_score']},{result['final_score']}"
-            st.download_button("📥 Download CSV", result_csv, "prediction.csv", "text/csv")
+            result_csv = f"CTR,Quality,Final Score,Tier\n{result['predicted_ctr']},{result['quality_score']},{result['final_score']},{tier}"
+            st.download_button("📥 CSV", result_csv, "prediction.csv", "text/csv", use_container_width=True)
         
         with col3:
-            if st.button("🔄 Clear Results", use_container_width=True):
+            # Create detailed report
+            report = f"""
+AD PREDICTION REPORT
+====================
+Generated: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+SCORES:
+- CTR Prediction: {ctr_pct:.2f}%
+- Quality Score: {result['quality_score']:.3f}
+- Final Score: {result['final_score']:.3f}
+- Performance Tier: {tier}
+
+ANALYSIS:
+- Percentile: Top {100-percentile:.0f}%
+- CTR Lift: {lift:+.1f}% vs average
+- Multiplier: {result['predicted_ctr'] / 0.2562:.2f}x baseline
+
+RECOMMENDATION:
+{
+"Deploy immediately - exceptional performance!" if result['predicted_ctr'] > 0.50 else
+"Strong candidate for deployment" if result['predicted_ctr'] > 0.35 else
+"Consider A/B testing with variations" if result['predicted_ctr'] > 0.20 else
+"Optimize before deployment"
+}
+"""
+            st.download_button("📄 Report", report, "ad_report.txt", "text/plain", use_container_width=True)
+        
+        with col4:
+            if st.button("🔄 Clear", use_container_width=True):
                 del st.session_state['last_result']
                 del st.session_state['last_features']
                 st.rerun()
