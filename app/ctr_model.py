@@ -1,141 +1,87 @@
-"""
-CTR Prediction Model - Production Ready
-Extracted from modelling.ipynb for deployment
-"""
-
+"""Strict inference for checksum-verified v2 bundles."""
+import hashlib
+import json
+from pathlib import Path
+import joblib
+import lightgbm as lgb
 import numpy as np
 import pandas as pd
-import lightgbm as lgb
 import xgboost as xgb
-import joblib
-import os
-import logging
-from sklearn.preprocessing import LabelEncoder
-from .feature_engineer import FeatureEngineer
+from .feature_engineer import FeatureEngineer, FEATURE_NAMES
 
-# Setup logger
-logger = logging.getLogger(__name__)
+MODEL_FILES = {'lightgbm_31': 'lightgbm_31.txt', 'lightgbm_63': 'lightgbm_63.txt',
+               'xgboost': 'xgboost.json', 'logistic': 'logistic.joblib'}
+
+
+def file_hash(path):
+    h = hashlib.sha256()
+    with open(path, 'rb') as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 class CTRPredictor:
-    """Production-ready CTR Prediction Model"""
-    
     def __init__(self, model_path=None):
-        self.lgb_model = None
-        self.xgb_model = None
-        self.ensemble_weights = {'lightgbm': 0.6, 'xgboost': 0.4}
-        self.feature_names = None
-        self.encoders = {}
-        self.feature_engineer = None
-        logger.info("CTRPredictor initialized")
-        
-        if model_path:
-            self.load_model(model_path)
-    
+        self.models = {}
+        self.load_model(model_path or Path(__file__).parent / 'models')
+
     def load_model(self, model_path):
-        """Load trained models"""
-        logger.info(f"Loading models from: {model_path}")
-        try:
-            # Load LightGBM model
-            self.lgb_model = lgb.Booster(model_file=f'{model_path}/lightgbm_model.txt')
-            print("✓ LightGBM model loaded")
-            logger.info("LightGBM model loaded successfully")
-        except Exception as e:
-            print(f"Warning: Could not load LightGBM model: {e}")
-            logger.warning(f"Could not load LightGBM model: {e}")
-        
-        try:
-            # Load XGBoost model
-            self.xgb_model = xgb.XGBClassifier()
-            self.xgb_model.load_model(f'{model_path}/xgboost_model.json')
-            print("✓ XGBoost model loaded")
-            logger.info("XGBoost model loaded successfully")
-        except Exception as e:
-            print(f"Warning: Could not load XGBoost model: {e}")
-            logger.warning(f"Could not load XGBoost model: {e}")
-        
-        # Load feature engineering artifacts
-        artifacts_path = os.path.join(model_path, 'feature_engineering_artifacts.pkl')
-        if os.path.exists(artifacts_path):
-            try:
-                self.feature_engineer = FeatureEngineer(artifacts_path)
-                print("✓ Feature engineering pipeline loaded")
-                logger.info("Feature engineering pipeline loaded successfully")
-            except Exception as e:
-                print(f"Warning: Could not load feature engineering: {e}")
-                print("Will use basic preprocessing")
-                logger.warning(f"Could not load feature engineering: {e}")
-        
-        if not self.lgb_model and not self.xgb_model:
-            logger.error("No models could be loaded!")
-            raise ValueError("No models could be loaded!")
-    
-    def preprocess_features(self, df):
-        """Preprocess features for prediction"""
-        df_processed = df.copy()
-        
-        # Convert any object columns to numeric
-        for col in df_processed.columns:
-            if df_processed[col].dtype == 'object':
-                if col not in self.encoders:
-                    unique_vals = df_processed[col].unique()
-                    self.encoders[col] = {val: idx for idx, val in enumerate(unique_vals)}
-                    self.encoders[col]['__UNKNOWN__'] = len(unique_vals)
-                
-                df_processed[col] = df_processed[col].map(
-                    lambda x: self.encoders[col].get(x, self.encoders[col]['__UNKNOWN__'])
-                ).astype(int)
-        
-        # Ensure all columns are numeric
-        for col in df_processed.columns:
-            df_processed[col] = pd.to_numeric(df_processed[col], errors='coerce').fillna(0)
-        
-        return df_processed
-    
+        root = Path(model_path)
+        manifest = json.loads((root / 'manifest.json').read_text(encoding='utf-8'))
+        if manifest.get('schema_version') != 2 or manifest.get('feature_names') != FEATURE_NAMES:
+            raise ValueError('Incompatible model schema; a complete v2 bundle is required')
+        weights = manifest.get('weights', {})
+        if not weights or set(weights) - set(MODEL_FILES) - {'global_rate'}:
+            raise ValueError('Invalid model selection')
+        if not all(isinstance(v, (int, float)) and np.isfinite(v) and v >= 0 for v in weights.values()) or not np.isclose(sum(weights.values()), 1):
+            raise ValueError('Invalid ensemble weights')
+        required = {'transformer.json'} | {MODEL_FILES[name] for name, weight in weights.items()
+                                         if weight > 0 and name != 'global_rate'}
+        for name in required:
+            path = root / name
+            if not path.is_file() or file_hash(path) != manifest.get('files', {}).get(name):
+                raise ValueError(f'Bundle checksum mismatch or missing file: {name}')
+        self.feature_engineer = FeatureEngineer.load(root / 'transformer.json')
+        models = {}
+        for name, weight in weights.items():
+            if weight == 0 or name == 'global_rate':
+                continue
+            path = root / MODEL_FILES[name]
+            if name.startswith('lightgbm'):
+                model = lgb.Booster(model_file=str(path))
+                if model.feature_name() != FEATURE_NAMES:
+                    raise ValueError('LightGBM feature order mismatch')
+            elif name == 'xgboost':
+                model = xgb.XGBClassifier(n_jobs=4)
+                model.load_model(path)
+                if model.get_booster().feature_names != FEATURE_NAMES:
+                    raise ValueError('XGBoost feature order mismatch')
+            else:
+                model = joblib.load(path)  # Locally trained, checksum-pinned bundle only.
+                if list(model.feature_names_in_) != FEATURE_NAMES:
+                    raise ValueError('Logistic feature order mismatch')
+            models[name] = model
+        if not 0 < manifest.get('threshold', 0) < 1 or not 0 <= manifest.get('prior', -1) <= 1:
+            raise ValueError('Invalid probability metadata')
+        self.models, self.manifest, self.ensemble_weights = models, manifest, weights
+
     def predict(self, X, return_probability=True):
-        """
-        Make CTR predictions
-        
-        Args:
-            X: DataFrame with features (raw or engineered)
-            return_probability: If True, return probabilities; else binary predictions
-        
-        Returns:
-            Array of predictions
-        """
-        # If we have feature engineer and X has raw features, transform them
-        if self.feature_engineer is not None and len(X.columns) < 100:
-            # Looks like raw features (39 columns), engineer them
-            X_processed = self.feature_engineer.transform(X)
-        else:
-            # Already engineered or no feature engineer available
-            X_processed = self.preprocess_features(X)
-        
-        predictions = []
-        
-        # LightGBM prediction
-        if self.lgb_model:
-            lgb_pred = self.lgb_model.predict(X_processed)
-            predictions.append(lgb_pred)
-        
-        # XGBoost prediction
-        if self.xgb_model:
-            xgb_pred = self.xgb_model.predict_proba(X_processed)[:, 1]
-            predictions.append(xgb_pred)
-        
-        # Ensemble
-        if len(predictions) > 1:
-            weights = [self.ensemble_weights['lightgbm'], self.ensemble_weights['xgboost']]
-            ensemble_pred = np.average(predictions, axis=0, weights=weights[:len(predictions)])
-        else:
-            ensemble_pred = predictions[0]
-        
-        if return_probability:
-            return ensemble_pred
-        else:
-            return (ensemble_pred >= 0.5).astype(int)
-    
+        engineered = self.feature_engineer.transform(X)
+        prediction = np.zeros(len(X), dtype=float)
+        for name, weight in self.ensemble_weights.items():
+            if weight == 0:
+                continue
+            if name == 'global_rate':
+                values = np.full(len(X), self.manifest['prior'])
+            elif name.startswith('lightgbm'):
+                values = self.models[name].predict(engineered, num_threads=4)
+            else:
+                values = self.models[name].predict_proba(engineered)[:, 1]
+            prediction += weight * values
+        if not np.isfinite(prediction).all() or ((prediction < 0) | (prediction > 1)).any():
+            raise ValueError('Invalid model probabilities')
+        return prediction if return_probability else (prediction >= self.manifest['threshold']).astype(int)
+
     def predict_batch(self, X_list):
-        """Predict for multiple ad instances"""
-        df = pd.DataFrame(X_list)
-        return self.predict(df)
+        return self.predict(pd.DataFrame(X_list))

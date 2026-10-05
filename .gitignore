@@ -23,6 +23,7 @@ wheels/
 
 # Jupyter Notebook
 .ipynb_checkpoints
+.pytest_cache/
 
 # pyenv
 .python-version
@@ -62,8 +63,13 @@ app/models/*.bin
 !requirements.txt
 !runtime.txt
 !app/models/README.md
+!app/models/manifest.json
+!app/models/transformer.json
+!app/models/lightgbm_63.txt
 
 # Logs
 *.log
 logs/
 *.log.*
+artifacts/
+scripts/update_public_claims.py

@@ -1,91 +1,101 @@
-# CTR Prediction and Ad Scoring System
+# CTR Predictor and Candidate Ranking
 
-An academic machine-learning project for training, comparing, and serving click-through-rate models on a 10-million-row sample of the Criteo Display Advertising dataset.
+A bounded Criteo click-prediction study with one training-fitted transformer shared
+by offline evaluation, Flask and Streamlit. Candidate scores are predicted click
+probabilities; anonymous fields do not establish semantic ad quality.
 
-[Live Streamlit app](https://ctrpredictor.streamlit.app/) · [Deployment notes](STREAMLIT_DEPLOYMENT.md)
+The October 2026 v2 rebuild fixes pre-split target-label leakage, request-batch
+fitting, process-dependent hashes and missing-value indicators. Historical v1.0
+models/scores remain historical; v2 does not reproduce or validate their AUC.
 
-## Results
+## Measured result — 5 October 2026
 
-| Model | Test AUC | Log loss |
+Validation selected LightGBM with 63 leaves; the ensemble did not improve its
+validation log loss. Retained rows after exact feature-duplicate filtering:
+599,971 training, 149,994 validation, **249,987 final test**. The test window is
+beyond the historical 10,000,001-row prefix; row order is not a verified timestamp.
+
+| Final test metric | Selected LightGBM | 95% row-bootstrap interval |
 |---|---:|---:|
-| XGBoost | **0.9067** | **0.3105** |
-| LightGBM | 0.9024 | 0.3180 |
-| Ensemble | 0.9067 | 0.3106 |
+| ROC AUC | 0.76052 | 0.75874–0.76244 |
+| Log loss | 0.48573 | 0.48373–0.48764 |
+| Brier score | 0.15811 | 0.15733–0.15879 |
+| Average precision | 0.55162 | — |
+| F1 at validation-selected threshold 0.28 | 0.54002 | — |
+| Top-decile predictive enrichment | 2.574× | 2.557–2.595× |
 
-- **Data:** 10 million Criteo records, split into 7 million training, 1 million validation, and 2 million test rows.
-- **Features:** 150 model features derived from 13 integer and 26 categorical input fields.
-- **Ranking analysis:** the recorded experiment reports 265.6% CTR lift in the top prediction decile.
-- **Serving:** the repository includes a Flask API and Streamlit interface; single-prediction latency was below 0.5 seconds in project tests.
+Top decile: 16,777 clicked rows / 24,999 selected rows (67.11%), against a
+26.07% test click rate. This is observed predictive enrichment within the sample,
+not causal CTR/revenue improvement. AUC is not accuracy. Global-rate and logistic
+baselines and all tree candidates are in [the full report](evidence/benchmark.json).
+Baseline F1 uses the selected model's threshold; constant-baseline top-decile
+ordering is arbitrary. Empty calibration bins are omitted.
 
-These are offline academic results, not online A/B-test or commercial-impact measurements. Latency varies with hardware, model loading, and request concurrency.
+Local warmed inference, including preprocessing and excluding model loading:
+30 repetitions, median **183.8 ms for one row**, **186.9 ms for 100 rows**;
+p95 192.8/197.9 ms. Recorded hardware and scope are in the report. These timings
+do not establish concurrent-serving capacity or a production SLA.
 
-## What is included
+## Run
 
-- Feature engineering for sparse numerical and categorical advertising data.
-- XGBoost and LightGBM model wrappers plus Optuna-based tuning support.
-- Ad scoring and ranking utilities.
-- Flask endpoints for health checks, prediction, scoring, and batch workflows.
-- Streamlit dashboard for model inspection and what-if scoring.
+Python 3.12; exact direct dependencies in `requirements.txt`, observed full
+Windows environment in `requirements-lock.txt`.
 
-## Repository structure
-
-```text
-.
-├── app/
-│   ├── feature_engineer.py       # transforms 39 raw fields into model features
-│   ├── ctr_model.py              # model loading and prediction
-│   ├── ad_scorer.py              # score calculation
-│   └── ad_ranking_system.py      # ranking workflow
-├── app.py                        # Flask API
-├── streamlit_app.py              # interactive dashboard
-├── download_models.py            # retrieves packaged model artifacts
-├── test_api.py                   # live API smoke checks
-└── requirements.txt
-```
-
-## Quick start
-
-Requires Python 3.10 or newer.
-
-```bash
-git clone https://github.com/Venkateswara-Sahu/CTR_Predictor_and_Scorer.git
-cd CTR_Predictor_and_Scorer
+```powershell
 python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m pytest
+.\.venv\Scripts\python.exe app.py
+.\.venv\Scripts\streamlit.exe run streamlit_app.py
 ```
 
-Activate the environment, then install dependencies and retrieve the model artifacts:
+The selected native model, JSON transformer and manifest are checked into
+`app/models`; no old-release download or arbitrary pickle fallback runs on app
+startup. Missing, incompatible or checksum-mismatched assets fail closed.
 
-```bash
-pip install -r requirements.txt
-python download_models.py
+Flask endpoints: `/health`, `/predict_ctr`, `/rank_ads`, `/predict_single`.
+Raw input accepts I1–I13 numbers/null and C1–C26 strings/null. Omitted fields are
+missing. Unknown fields and malformed values fail with 400. Requests accept at
+most 1,000 rows. `/score_ad` returns 410: historical semantic quality proxies are
+retired. `/rank_ads` returns input-row `ad_id`, `predicted_ctr`, `final_score`;
+`final_score` equals `predicted_ctr`. This is a v2 API contract change.
+
+```json
+{"features": {"I1": 4, "I2": null, "C1": "category-hash", "C2": null}}
 ```
 
-Run either interface:
+Partial/unseen inputs work mechanically but carry no evaluated performance
+guarantee. The UI examples are synthetic, not real advertisements.
 
-```bash
-python app.py
-streamlit run streamlit_app.py
+## Reproduce the study
+
+Obtain the labelled Criteo Kaggle `train.txt` separately; raw data is not included.
+Run from the repo root in the pinned environment:
+
+```powershell
+python -m training.train --source "PATH\TO\train.txt" --output artifacts/new-run
+python -m training.evaluate --bundle artifacts/new-run
 ```
 
-The API listens on `http://localhost:5000`; Streamlit normally uses `http://localhost:8501`.
+Read the [frozen protocol](docs/evaluation-protocol.md) first. Training extracts
+fixed source windows and pins raw bytes. Only training rows fit medians,
+frequencies and target maps; training target values use five-fold label exclusion.
+The feature schema has **123 features from 39 fields**. Deterministic categorical
+hashing has collisions; it is not a learned embedding. Model selection and F1
+threshold selection use validation only. Final evaluation checks frozen hashes
+and creates a once-only marker. Do not reuse the same test for later tuning.
 
-To exercise the live API, start `python app.py` in one terminal and run this in another:
+Saved evidence: [manifest](evidence/manifest.json), [benchmark](evidence/benchmark.json),
+[raw test predictions](evidence/test_predictions.csv.gz), [evaluation start record](evidence/evaluation_started.json).
+Predictions contain original source row IDs, labels and each model's probabilities.
+The local ignored bundle also preserves baseline assets and duplicate fingerprints;
+rerun training to reconstruct them. The shipping bundle includes only the selected
+model. Code hashes identify the executed training code; evaluation has its own hash.
 
-```bash
-python test_api.py
-```
+## Limits
 
-## Evaluation notes
-
-The metrics above are the values displayed by the project application and recorded during the Term 7 Predictive Analysis project (Sep–Nov 2025). The large training dataset and model artifacts are not stored directly in Git. Reproducing the exact scores requires the same Criteo sample, split, preprocessing configuration, and random seeds used for the recorded experiment.
-
-## Limitations
-
-- The repository is a portfolio and academic implementation; it has not served production advertising traffic.
-- Offline AUC and top-decile lift do not demonstrate revenue lift or improved user experience.
-- Model artifacts are downloaded separately and should be checked before deployment in another environment.
-- The API smoke script expects a locally running Flask service and is not an isolated unit-test suite.
-
-## Attribution
-
-Dataset: [Criteo Display Advertising Challenge](https://ailab.criteo.com/ressources/). Developed for the Predictive Analysis course at Lovely Professional University.
+This is a bounded sample prototype, not a full Criteo result or industrial ranking
+system. Independent-row intervals omit advertiser/time clustering. No live traffic,
+causal intervention, revenue, fairness, or semantic quality evaluation is established.
+The original larger academic run used a different, invalid preprocessing contract;
+its historical score cannot be compared as a valid baseline.
