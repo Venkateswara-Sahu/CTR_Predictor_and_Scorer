@@ -1,0 +1,6 @@
+# Preserve exact frozen artifact and executed-source bytes across operating systems.
+* -text
+* whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+*.gz binary
+app/models/lightgbm_63.txt binary
+app/models/transformer.json binary
